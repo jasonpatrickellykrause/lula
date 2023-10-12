@@ -1,0 +1,26 @@
+name: Scan for CVEs
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  pull_request:
+    paths:
+      - "go.mod"
+      - "go.sum"
+
+jobs:
+  scan-cves:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan Repo
+        uses: anchore/scan-action@v3
+        with:
+            path: "."
+            severity-cutoff: "high"
+            output-format: "table"

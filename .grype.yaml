@@ -1,0 +1,4 @@
+# Grype Configuration File. Typically used for ignoring and documenting false positives.
+# Example below
+# ignore:
+#   - vulnerability: GHSA-2h5h-59f5-c5x9
