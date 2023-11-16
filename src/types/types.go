@@ -57,9 +57,16 @@ type Result struct {
 // Current placeholder for all requisite data in the payload
 // Fields will be populated as required otherwise left empty
 // This could be expanded as providers add more fields
+type Regoable interface {
+	Rego() string
+	// Rego string `mapstructure:"rego" json:"rego" yaml:"rego"`
+}
+
 type Payload struct {
 	ResourceRules []ResourceRule `json:"resource-rules" yaml:"resource-rules"`
 	Rego          string         `json:"rego" yaml:"rego"`
+	Rego() string
+	// TODO: pickup here next time!
 }
 
 type PayloadAPI struct {

@@ -21,21 +21,18 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 )
 
-func Validate(ctx context.Context, domain string, data map[string]interface{}) (types.Result, error) {
-	// query kubernetes for resource data if domain == "kubernetes"
-	// TODO: evaluate processes for manifests/helm charts
-	if domain == "kubernetes" {
-		// Convert map[string]interface to a RegoTarget
+func ValidateKubernetes(ctx context.Context, data map[string]interface{}) (context.Context, Regoable, []map[string]interface{}, error) {
+	// Convert map[string]interface to a RegoTarget
 		var payload types.Payload
 		err := mapstructure.Decode(data, &payload)
 		if err != nil {
-			return types.Result{}, err
+			return nil, nil, nil, err
 		}
 
 		var resources []unstructured.Unstructured
 		resources, err = kube.QueryCluster(ctx, payload)
 		if err != nil {
-			return types.Result{}, err
+			return nil, nil, nil, err
 		}
 		// Need []map[string]interface{} for rego validation
 		var mapData []map[string]interface{}
@@ -43,70 +40,86 @@ func Validate(ctx context.Context, domain string, data map[string]interface{}) (
 			mapData = append(mapData, item.Object)
 		}
 
-		// TODO: Add logging optionality for understanding what resources are actually being validated
-		results, err := GetValidatedAssets(ctx, payload.Rego, mapData)
+		return ctx, mapData, nil
+}
+
+func ValidateAPI(ctx context.Context, data map[string]interface{}) (context.Context, Regoable, []map[string]interface{}, error) {
+	var payload types.PayloadAPI
+	err := mapstructure.Decode(data, &payload)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	transport := &http.Transport{}
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(payload.Request.URL)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if resp.StatusCode != 200 {
+		return nil, nil, nil, fmt.Errorf("expected status code 200 but got %d\n", resp.StatusCode)
+	}
+
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	var mapData []map[string]interface{}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "application/json" {
+
+		var prettyBuff bytes.Buffer
+		json.Indent(&prettyBuff, body, "", "  ")
+		prettyJson := prettyBuff.String()
+
+		// response body must be a list to unmarshal into mapData correctly
+		if ! strings.HasPrefix(prettyJson, "[") {
+			prettyJson = "["+strings.TrimSpace(prettyJson)+"]"
+		}
+
+		err = json.Unmarshal([]byte(prettyJson), &mapData)
 		if err != nil {
-			return types.Result{}, err
+			return nil, nil, nil, err
 		}
-
-		return results, nil
-
-	} else if domain == "api" {
-		var payload types.PayloadAPI
-		err := mapstructure.Decode(data, &payload)
-		if err != nil {
-			return types.Result{}, err
-		}
-
-		transport := &http.Transport{}
-		client := &http.Client{Transport: transport}
-		resp, err := client.Get(payload.Request.URL)
-		if err != nil {
-			return types.Result{}, err
-		}
-		if resp.StatusCode != 200 {
-			return types.Result{},
-			fmt.Errorf("expected status code 200 but got %d\n", resp.StatusCode)
-		}
-
-		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return types.Result{}, err
-		}
-
-		var mapData []map[string]interface{}
-
-		contentType := resp.Header.Get("Content-Type")
-		if contentType == "application/json" {
-
-			var prettyBuff bytes.Buffer
-			json.Indent(&prettyBuff, body, "", "  ")
-			prettyJson := prettyBuff.String()
-
-			// response body must be a list to unmarshal into mapData correctly
-			if ! strings.HasPrefix(prettyJson, "[") {
-				prettyJson = "["+strings.TrimSpace(prettyJson)+"]"
-			}
-
-			err = json.Unmarshal([]byte(prettyJson), &mapData)
-			if err != nil {
-				return types.Result{}, err
-			}
-
-		} else {
-			return types.Result{}, fmt.Errorf("content type %s is not supported", contentType)
-		}
-
-		results, err := GetValidatedAssets(ctx, payload.Rego, mapData)
-		if err != nil {
-			return types.Result{}, err
-		}
-		return results, nil
 
 	} else {
+		return nil, nil, nil, fmt.Errorf("content type %s is not supported", contentType)
+	}
+
+	return ctx, payload, mapData, nil
+}
+
+func Validate(ctx context.Context, domain string, data map[string]interface{}) (types.Result, error) {
+	var payload Regoable
+	var mapData []map[string]interface{}
+	var err error
+
+	switch domain {
+	case "kubernetes":
+		ctx, payload, mapData, err = ValidateKubernetes(ctx, data)
+		if err != nil {
+			return types.Result{}, err
+		}
+
+	case "api":
+		ctx, payload, mapData, err = ValidateAPI(ctx, data)
+		if err != nil {
+			return types.Result{}, err
+		}
+
+	default:
 		return types.Result{}, fmt.Errorf("domain %s is not supported", domain)
 	}
+
+	results, err := GetValidatedAssets(ctx, payload.Rego, mapData)
+	if err != nil {
+		return types.Result{}, err
+	}
+
+	return results, nil
 }
 
 // GetValidatedAssets performs the validation of the dataset against the given rego policy

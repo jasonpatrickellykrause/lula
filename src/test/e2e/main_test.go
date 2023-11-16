@@ -89,8 +89,8 @@ func TestMain(m *testing.M) {
 	)
 
 	testEnv.Finish(
-		envfuncs.DeleteNamespace(namespace),
-		envfuncs.DestroyCluster(kindClusterName),
+		// envfuncs.DeleteNamespace(namespace),
+		// envfuncs.DestroyCluster(kindClusterName),
 	)
 
 	os.Exit(testEnv.Run(m))
